@@ -23,7 +23,7 @@ String responseHTML = ""
         "<label for='ssid'>SSID:</label><br>"
         "<input type='text' id='ssid' name='ssid' value='John'><br>"
         "<label for='pwd'>Password:</label><br>"
-        "<input type='text' id='pwd' name='pwd' value='John'><br>"
+        "<input type='text' id='pwd' name='pwd' value='PWD'><br>"
         "<input type='submit' value='Submit'>"
       "</form>"
     "</body>"
@@ -31,7 +31,14 @@ String responseHTML = ""
 
 void saveWifiInfo() {
   Serial.println("Handle save wifi request.");
-  webServer.send(200, "text/html", "<h1>You are connected</h1>");
+  String message = "<h1>\n";
+         message += "You are connected\n";
+         message += "SSID: ";
+         message += webServer.arg("ssid");
+         message += "\nPassword: ";
+         message += webServer.arg("pwd");
+         message += "\n</h1>";
+  webServer.send(200, "text/html", message);
 }
 
 void setup() {
