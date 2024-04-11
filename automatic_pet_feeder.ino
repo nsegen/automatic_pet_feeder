@@ -1,44 +1,63 @@
-/*
-  Скетч к проекту "Автокормушка 2"
-  - Страница проекта (схемы, описания): https://alexgyver.ru/gyverfeed2/
-  - Исходники на GitHub: https://github.com/AlexGyver/GyverFeed2/
-  Проблемы с загрузкой? Читай гайд для новичков: https://alexgyver.ru/arduino-first/
-  AlexGyver, AlexGyver Technologies, 2020
-*/
+#include <ESP8266WiFi.h>
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
 
-#define FEED_SPEED 3000   // задержка между шагами мотора (мкс)
-#define STEPS_FRW 19        // шаги вперёд
-#define STEPS_BKW 12        // шаги назад
-const byte drvPins[] = { D5, D6, D7, D8 };//{ 14, 12, 13, 15 };  // драйвер (фазаА1, фазаА2, фазаВ1, фазаВ2) from D5 to D8
-int feedAmount = 1000;
+/* Set these to your desired credentials. */
+const char *ssid = "pet_feeder";
+const char *password = "pet_feeder";
+const byte DNS_PORT = 53;
+
+IPAddress apIP(172, 217, 28, 1);
+DNSServer dnsServer;
+ESP8266WebServer webServer(80);
+
+String responseHTML = ""
+  "<!DOCTYPE html><html lang='en'>"
+    "<head>"
+      "<meta name='viewport' content='width=device-width' />"
+      "<title>CaptivePortal</title>"
+    "</head>"
+    "<body>"
+      "<h1>Enter the WiFi SSID and Password:</h1>"
+      "<form action='/save'  method='post'>"
+        "<label for='ssid'>SSID:</label><br>"
+        "<input type='text' id='ssid' name='ssid' value='John'><br>"
+        "<label for='pwd'>Password:</label><br>"
+        "<input type='text' id='pwd' name='pwd' value='John'><br>"
+        "<input type='submit' value='Submit'>"
+      "</form>"
+    "</body>"
+  "</html>";
+
+void saveWifiInfo() {
+  Serial.println("Handle save wifi request.");
+  webServer.send(200, "text/html", "<h1>You are connected</h1>");
+}
 
 void setup() {
-  for (byte i = 0; i < 4; i++) pinMode(drvPins[i], OUTPUT);   // пины выходы
+  delay(1000);
+  Serial.begin(115200);
+  Serial.println();
+  Serial.println();
+  Serial.print("Configuring access point...");
+  /* You can remove the password parameter if you want the AP to be open. */
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+  WiFi.softAP(ssid, password);
+  
+  // if DNSServer is started with "*" for domain name, it will reply with
+  // provided IP to all DNS request
+  dnsServer.start(DNS_PORT, "*", apIP);
+
+  // replay to all requests with same HTML
+  webServer.onNotFound([]() {
+    webServer.send(200, "text/html", responseHTML);
+  });
+  webServer.on("/save", saveWifiInfo);
+  webServer.begin();
 }
 
 void loop() {
-  // feed();
-}
-
-void feed() {
-  for (int i = 0; i < feedAmount; i++) oneRev();
-  disableMotor();
-}
-
-// выключаем ток на мотор
-void disableMotor() {
-  for (byte i = 0; i < 4; i++) digitalWrite(drvPins[i], 0);
-}
-
-void oneRev() {
-  for (int i = 0; i < STEPS_BKW; i++) runMotor(-1);
-  for (int i = 0; i < STEPS_FRW; i++) runMotor(1);
-}
-
-const byte steps[] = {0b1010, 0b0110, 0b0101, 0b1001};
-void runMotor(int8_t dir) {
-  static byte step = 0;
-  for (byte i = 0; i < 4; i++) digitalWrite(drvPins[i], bitRead(steps[step & 0b11], i));
-  delayMicroseconds(FEED_SPEED);
-  step += dir;
+  dnsServer.processNextRequest();
+  webServer.handleClient();
 }
