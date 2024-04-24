@@ -1,12 +1,9 @@
 #include <ESP8266WiFi.h>
-#include <DNSServer.h>
 #include <ESP8266WebServer.h>
-
-struct WiFiSettings
-{
-  String ssid;
-  String password;
-};
+#include <WiFiManager.h>
+#include <ArduinoJson.h>
+const char ap_mode_ssid[] = "automatic_pet_feeder";
+const char ap_mode_password[] = "automatic_pet_feeder";
 
 class WiFiSettingsRequestHandler : public RequestHandler {
   public:
@@ -26,24 +23,39 @@ class WiFiSettingsRequestHandler : public RequestHandler {
         return false;
       }
       String jsonString = server.arg("plain");
-      Serial.println("[WiFiSettingsRequestHandler.handle] " + jsonString);
-      server.send(200, "application/json", jsonString);
+      JsonDocument doc;
+
+      DeserializationError error = deserializeJson(doc, jsonString);
+      if (error || !doc.containsKey("ssid") || !doc.containsKey("password"))
+      {
+        Serial.println(F("Failed to parse a request into wifi configuration."));
+        return false;
+      }
+      char ssid[128];
+      char password[128];
       
+      strlcpy(ssid, doc["ssid"], sizeof(ssid));    
+      strlcpy(password, doc["password"], sizeof(password));
+      Serial.print("[WiFiSettingsRequestHandler.handle] SSID: ");
+      Serial.print(ssid);
+      Serial.print(", PWD: ");
+      Serial.println(password);
       return true;
     }
 
   protected:
     String _uri;  
 };
-
-/* Set these to your desired credentials. */
-const char *ssid = "pet_feeder";
-const char *password = "pet_feeder";
-const byte DNS_PORT = 53;
-
-IPAddress apIP(172, 217, 28, 1);
-DNSServer dnsServer;
 ESP8266WebServer webServer(80);
+// Variable to store the HTTP request
+String header;
+
+// Auxiliar variables to store the current output state
+String outputState = "off";
+
+// Assign output variables to GPIO pins
+char output[2] = "5";
+
 
 String responseHTML = ""
   "<!DOCTYPE html><html lang='en'>"
@@ -54,9 +66,9 @@ String responseHTML = ""
     "<body>"
       "<h1>Enter the WiFi SSID and Password:</h1>"
       "<form name='wifi_info'>"
-        "<input name='ssid' value='John'>"
-        "<input name='password' value='Smith'>"
-        "<input type='button' value='update' onclick='update_wifi()'>"
+        "<div><input name='ssid' value='Keenetic-6112' /></div>"
+        "<div><input name='password' type='password' value='zLaN9DYZ' /></div>"
+        "<div><input type='button' value='update' onclick='update_wifi()' /></div>"
       "</form>"
       "<script>"
         "function update_wifi()"
@@ -91,33 +103,31 @@ void saveWifiInfo() {
   webServer.send(200, "text/html", message);
 }
 
-void setup() {
-  delay(1000);
-  Serial.begin(115200);
-  Serial.println();
-  Serial.println();
-  Serial.print("WiFiSettings struct size is ");
-  Serial.println(sizeof(WiFiSettings));
-  Serial.println("Configuring access point...");
-  /* You can remove the password parameter if you want the AP to be open. */
-  WiFi.mode(WIFI_AP);
-  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-  WiFi.softAP(ssid, password);
-  
-  // if DNSServer is started with "*" for domain name, it will reply with
-  // provided IP to all DNS request
-  dnsServer.start(DNS_PORT, "*", apIP);
 
-  // replay to all requests with same HTML
+
+void setup() {
+  Serial.begin(115200);
+  delay(100); 
+  WiFiManager wifiManager;
+  wifiManager.setDebugOutput(false);
+  wifiManager.autoConnect(ap_mode_ssid, ap_mode_password);
+  Serial.print("Connected! IP address: ");
+  Serial.println(WiFi.localIP());
+  Serial.println("[setup] Configure 'not found' URL handler.");
   webServer.onNotFound([]() {
     webServer.send(200, "text/html", responseHTML);
   });
+  Serial.println("[setup] Configure 'save' URL handler.");
   webServer.on("/save", saveWifiInfo);
+  Serial.println("[setup] Configure 'update_wifi' URL handler.");
   webServer.addHandler(new WiFiSettingsRequestHandler("/update_wifi"));
+  Serial.println("[setup] Start web server.");
   webServer.begin();
+  Serial.println("[setup] Web server started.");
+  delay(500);
 }
 
 void loop() {
-  dnsServer.processNextRequest();
   webServer.handleClient();
+  delay(500);
 }
