@@ -1,9 +1,25 @@
-#include <ESP8266WiFi.h>
+/*
+  Скетч к проекту "Автокормушка 2"
+  - Страница проекта (схемы, описания): https://alexgyver.ru/gyverfeed2/
+  - Исходники на GitHub: https://github.com/AlexGyver/GyverFeed2/
+  Проблемы с загрузкой? Читай гайд для новичков: https://alexgyver.ru/arduino-first/
+  AlexGyver, AlexGyver Technologies, 2020
+*/
+
+#define FEED_SPEED 3000   // задержка между шагами мотора (мкс)
+#define STEPS_FRW 19        // шаги вперёд
+#define STEPS_BKW 12        // шаги назад#include <ESP8266WiFi.h>
+#define FEED_AMOUNT 1000;
+#define DEBUG false
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
 const char ap_mode_ssid[] = "automatic_pet_feeder";
 const char ap_mode_password[] = "automatic_pet_feeder";
+const byte drvPins[] = { D5, D6, D7, D8 };//{ 14, 12, 13, 15 };  // драйвер (фазаА1, фазаА2, фазаВ1, фазаВ2) from D5 to D8
+const byte steps[] = {0b1010, 0b0110, 0b0101, 0b1001};
+ESP8266WebServer webServer(80);
+WiFiManager wifiManager;
 
 class WiFiSettingsRequestHandler : public RequestHandler {
   public:
@@ -12,7 +28,10 @@ class WiFiSettingsRequestHandler : public RequestHandler {
     }
     bool canHandle(HTTPMethod method, const String& uri) override
     { 
-      Serial.println("[WiFiSettingsRequestHandler.canHandle] " + uri);
+      Serial.print("[WiFiSettingsRequestHandler.canHandle] " + uri);
+      Serial.print(method);
+      Serial.print(": " + uri);
+
       return method == HTTP_POST && uri == _uri;
     }
 
@@ -46,88 +65,183 @@ class WiFiSettingsRequestHandler : public RequestHandler {
   protected:
     String _uri;  
 };
-ESP8266WebServer webServer(80);
-// Variable to store the HTTP request
-String header;
 
-// Auxiliar variables to store the current output state
-String outputState = "off";
+class Feeder {
+  private:
+    const byte *drvPins;
+    const byte *steps;
+    short feedSpeed;   // задержка между шагами мотора (мкс)
+    short feedAmount;
+    short stepsFrw;       // шаги вперёд
+    short stepsBkw;
+    bool shouldFeed;
+    
+    // выключаем ток на мотор
+    void disableMotor() {
+      for (byte i = 0; i < 4; i++) digitalWrite(drvPins[i], 0);
+    }
 
-// Assign output variables to GPIO pins
-char output[2] = "5";
+    void oneRev() {
+      for (int i = 0; i < stepsBkw; i++) runMotor(-1);
+      for (int i = 0; i < stepsFrw; i++) runMotor(1);
+    }
 
+    void runMotor(short dir) {
+      static byte step = 0;
+      for (byte i = 0; i < 4; i++) digitalWrite(drvPins[i], bitRead(steps[step & 0b11], i));
+      delayMicroseconds(feedSpeed);
+      step += dir;
+    }
 
-String responseHTML = ""
-  "<!DOCTYPE html><html lang='en'>"
-    "<head>"
-      "<meta name='viewport' content='width=device-width' />"
-      "<title>CaptivePortal</title>"
-    "</head>"
-    "<body>"
-      "<h1>Enter the WiFi SSID and Password:</h1>"
-      "<form name='wifi_info'>"
-        "<div><input name='ssid' value='Keenetic-6112' /></div>"
-        "<div><input name='password' type='password' value='zLaN9DYZ' /></div>"
-        "<div><input type='button' value='update' onclick='update_wifi()' /></div>"
-      "</form>"
-      "<script>"
-        "function update_wifi()"
-        "{"
-          "let obj = {};"
-          "let formData = new FormData(document.forms.wifi_info);"
-          "formData.forEach(function(value, key) {"
-            "obj[key] = value;"
-          "});"
-          "let json = JSON.stringify(obj);"          
-          "let xhr = new XMLHttpRequest();"
+  public:
+    Feeder(const byte motorPins[4], const byte motorSteps[4]) : drvPins(motorPins), steps(motorSteps) {
+      feedSpeed = FEED_SPEED;   // задержка между шагами мотора (мкс)
+      feedAmount = FEED_AMOUNT;
+      stepsFrw = STEPS_FRW;       // шаги вперёд
+      stepsBkw = STEPS_BKW;
+      shouldFeed = false;
+    }
+    
+    short getFeedSpeed() { return feedSpeed; }
+    void setFeedSpeed(short speed) { feedSpeed = speed; }
 
-          "xhr.open('POST', '/update_wifi');"
-          "xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');"
-          "xhr.send(json);"
+    short getFeedAmount() { return feedAmount; }
+    void setFeedAmount(short amount) { feedAmount = amount; }
+    
+    short getStepsFrw() { return stepsFrw; }
+    void setStepsFrw(short steps) { stepsFrw = steps; }
+    
+    short getStepsBkw() { return stepsBkw; }
+    void setStepsBkw(short steps) { stepsBkw = steps; }
 
-          "xhr.onload = () => alert(xhr.response);"
-        "}"
-      "</script>"
-    "</body>"
-  "</html>";
+    void feed() { shouldFeed = true; }
+    void handleFeeder() {
+      if (shouldFeed) {
+        for (int i = 0; i < feedAmount; i++) oneRev();
+        disableMotor();
+        shouldFeed = false;
+      }
+    }
+};
 
-void saveWifiInfo() {
-  Serial.println("Handle save wifi request.");
-  String message = "<h1>\n";
-         message += "You are connected\n";
-         message += "SSID: ";
-         message += webServer.arg("ssid");
-         message += "\nPassword: ";
-         message += webServer.arg("pwd");
-         message += "\n</h1>";
-  webServer.send(200, "text/html", message);
-}
+Feeder feeder(drvPins, steps);
 
+class FeedConfigRequestHandler : public RequestHandler {
+  private:
+    short feedValueExtract(JsonDocument& doc, const char* prop) {
+        short val =  doc[prop].as<short>();
+        
+        Serial.print("[FeedRequestHandler.feedValueExtract] ");
+        Serial.print(prop);
+        Serial.print(" is ");
+        Serial.println(val);
+        
+        return val;
+    }
+  public:
+    FeedConfigRequestHandler(const char* uri = "feedConfig") : _uri(uri)
+    {
+    }
+    bool canHandle(HTTPMethod method, const String& uri) override
+    { 
+      Serial.print("[FeedConfigRequestHandler.canHandle] ");
+      Serial.print(method);
+      Serial.println(": " + uri);
 
+      return method == HTTP_POST && uri == _uri;
+    }
+
+    bool handle(ESP8266WebServer &server, HTTPMethod requestMethod, const String &requestUri) override 
+    { 
+      Serial.println("[FeedConfigRequestHandler.handle] " + requestUri);
+      if (!canHandle(requestMethod, requestUri)) {
+        return false;
+      }
+      String jsonString = server.arg("plain");
+      JsonDocument doc;
+
+      DeserializationError error = deserializeJson(doc, jsonString);
+      if (doc.containsKey("feedSpeed")) {
+        feeder.setFeedSpeed(feedValueExtract(doc, "feedSpeed"));
+      }
+      if (doc.containsKey("feedAmount")) {
+        feeder.setFeedAmount(feedValueExtract(doc, "feedAmount"));
+      }
+      if (doc.containsKey("feedSpeed")) {
+        feeder.setStepsFrw(feedValueExtract(doc, "stepsFrw"));
+      }
+      if (doc.containsKey("feedSpeed")) {
+        feeder.setStepsBkw(feedValueExtract(doc, "stepsBkw"));
+      }
+      return true;
+    }
+
+  protected:
+    String _uri;  
+};
+
+class FeedRequestHandler : public RequestHandler {
+  public:
+    FeedRequestHandler(const char* uri = "feed") : _uri(uri)
+    {
+    }
+    bool canHandle(HTTPMethod method, const String& uri) override
+    { 
+      Serial.print("[FeedRequestHandler.canHandle] ");
+      Serial.print(method);
+      Serial.println(": " + uri);
+
+      return method == HTTP_POST && uri == _uri;
+    }
+
+    bool handle(ESP8266WebServer &server, HTTPMethod requestMethod, const String &requestUri) override 
+    { 
+      Serial.println("[FeedRequestHandler.handle] " + requestUri);
+      if (!canHandle(requestMethod, requestUri)) {
+        return false;
+      }      
+      feeder.feed();
+      return true;
+    }
+
+  protected:
+    String _uri;  
+};
 
 void setup() {
   Serial.begin(115200);
-  delay(100); 
-  WiFiManager wifiManager;
-  wifiManager.setDebugOutput(false);
-  wifiManager.autoConnect(ap_mode_ssid, ap_mode_password);
-  Serial.print("Connected! IP address: ");
-  Serial.println(WiFi.localIP());
-  Serial.println("[setup] Configure 'not found' URL handler.");
-  webServer.onNotFound([]() {
-    webServer.send(200, "text/html", responseHTML);
-  });
-  Serial.println("[setup] Configure 'save' URL handler.");
-  webServer.on("/save", saveWifiInfo);
-  Serial.println("[setup] Configure 'update_wifi' URL handler.");
-  webServer.addHandler(new WiFiSettingsRequestHandler("/update_wifi"));
+  delay(1000); 
+  WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP    
+
+  #if (DEBUG)
+    Serial.print("Debug mode. Reset settings.");
+    wifiManager.resetSettings();
+  #endif
+  wifiManager.setConfigPortalBlocking(false);
+  // wifiManager.setConfigPortalTimeout(60);
+  wifiManager.setDebugOutput(true);
+  wifiManager.setConnectTimeout(60);
+  wifiManager.setCaptivePortalEnable(true);
+  wifiManager.setWebPortalClientCheck(true);
+  wifiManager.setWiFiAutoReconnect(true);
+  // wifiManager.setConnectRetries(3);
+  if (wifiManager.autoConnect(ap_mode_ssid, ap_mode_password)) {
+    Serial.print("Connected! IP address: ");
+    Serial.println(WiFi.localIP());
+    Serial.println("[setup] Configure 'update_wifi' URL handler.");
+  } else {
+      Serial.println("Configportal running");
+  }
+  webServer.addHandler(new FeedRequestHandler("/feed"));
+  webServer.addHandler(new FeedConfigRequestHandler("/feedConfig"));
   Serial.println("[setup] Start web server.");
   webServer.begin();
   Serial.println("[setup] Web server started.");
-  delay(500);
+  for (byte i = 0; i < 4; i++) pinMode(drvPins[i], OUTPUT);   // пины выходы
 }
 
 void loop() {
+  wifiManager.process();
   webServer.handleClient();
-  delay(500);
+  feeder.handleFeeder();
 }
