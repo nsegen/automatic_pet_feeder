@@ -6,20 +6,18 @@
   AlexGyver, AlexGyver Technologies, 2020
 */
 
-#define FEED_SPEED 3000   // задержка между шагами мотора (мкс)
-#define STEPS_FRW 19        // шаги вперёд
-#define STEPS_BKW 12        // шаги назад#include <ESP8266WiFi.h>
-#define FEED_AMOUNT 1000;
 #define DEBUG false
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
+#include "Feeder.h"
 const char ap_mode_ssid[] = "automatic_pet_feeder";
 const char ap_mode_password[] = "automatic_pet_feeder";
 const byte drvPins[] = { D5, D6, D7, D8 };//{ 14, 12, 13, 15 };  // драйвер (фазаА1, фазаА2, фазаВ1, фазаВ2) from D5 to D8
 const byte steps[] = {0b1010, 0b0110, 0b0101, 0b1001};
 ESP8266WebServer webServer(80);
 WiFiManager wifiManager;
+Feeder feeder(drvPins, steps);
 
 class WiFiSettingsRequestHandler : public RequestHandler {
   public:
@@ -65,66 +63,6 @@ class WiFiSettingsRequestHandler : public RequestHandler {
   protected:
     String _uri;  
 };
-
-class Feeder {
-  private:
-    const byte *drvPins;
-    const byte *steps;
-    short feedSpeed;   // задержка между шагами мотора (мкс)
-    short feedAmount;
-    short stepsFrw;       // шаги вперёд
-    short stepsBkw;
-    bool shouldFeed;
-    
-    // выключаем ток на мотор
-    void disableMotor() {
-      for (byte i = 0; i < 4; i++) digitalWrite(drvPins[i], 0);
-    }
-
-    void oneRev() {
-      for (int i = 0; i < stepsBkw; i++) runMotor(-1);
-      for (int i = 0; i < stepsFrw; i++) runMotor(1);
-    }
-
-    void runMotor(short dir) {
-      static byte step = 0;
-      for (byte i = 0; i < 4; i++) digitalWrite(drvPins[i], bitRead(steps[step & 0b11], i));
-      delayMicroseconds(feedSpeed);
-      step += dir;
-    }
-
-  public:
-    Feeder(const byte motorPins[4], const byte motorSteps[4]) : drvPins(motorPins), steps(motorSteps) {
-      feedSpeed = FEED_SPEED;   // задержка между шагами мотора (мкс)
-      feedAmount = FEED_AMOUNT;
-      stepsFrw = STEPS_FRW;       // шаги вперёд
-      stepsBkw = STEPS_BKW;
-      shouldFeed = false;
-    }
-    
-    short getFeedSpeed() { return feedSpeed; }
-    void setFeedSpeed(short speed) { feedSpeed = speed; }
-
-    short getFeedAmount() { return feedAmount; }
-    void setFeedAmount(short amount) { feedAmount = amount; }
-    
-    short getStepsFrw() { return stepsFrw; }
-    void setStepsFrw(short steps) { stepsFrw = steps; }
-    
-    short getStepsBkw() { return stepsBkw; }
-    void setStepsBkw(short steps) { stepsBkw = steps; }
-
-    void feed() { shouldFeed = true; }
-    void handleFeeder() {
-      if (shouldFeed) {
-        for (int i = 0; i < feedAmount; i++) oneRev();
-        disableMotor();
-        shouldFeed = false;
-      }
-    }
-};
-
-Feeder feeder(drvPins, steps);
 
 class FeedConfigRequestHandler : public RequestHandler {
   private:
@@ -244,4 +182,5 @@ void loop() {
   wifiManager.process();
   webServer.handleClient();
   feeder.handleFeeder();
+  delay(500);
 }
