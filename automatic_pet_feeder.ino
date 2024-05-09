@@ -10,7 +10,12 @@
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
+#include <EEPROM.h>
 #include "Feeder.h"
+#include "WiFiSettingsRequestHandler.h"
+#include "FeedConfigRequestHandler.h"
+#include "FeedRequestHandler.h"
+
 const char ap_mode_ssid[] = "automatic_pet_feeder";
 const char ap_mode_password[] = "automatic_pet_feeder";
 const byte drvPins[] = { D5, D6, D7, D8 };//{ 14, 12, 13, 15 };  // драйвер (фазаА1, фазаА2, фазаВ1, фазаВ2) from D5 to D8
@@ -19,136 +24,70 @@ ESP8266WebServer webServer(80);
 WiFiManager wifiManager;
 Feeder feeder(drvPins, steps);
 
-class WiFiSettingsRequestHandler : public RequestHandler {
-  public:
-    WiFiSettingsRequestHandler(const char* uri = "update_wifi") : _uri(uri)
-    {
-    }
-    bool canHandle(HTTPMethod method, const String& uri) override
-    { 
-      Serial.print("[WiFiSettingsRequestHandler.canHandle] " + uri);
-      Serial.print(method);
-      Serial.print(": " + uri);
-
-      return method == HTTP_POST && uri == _uri;
-    }
-
-    bool handle(ESP8266WebServer &server, HTTPMethod requestMethod, const String &requestUri) override 
-    { 
-      Serial.println("[WiFiSettingsRequestHandler.handle] " + requestUri);
-      if (!canHandle(requestMethod, requestUri)) {
-        return false;
-      }
-      String jsonString = server.arg("plain");
-      JsonDocument doc;
-
-      DeserializationError error = deserializeJson(doc, jsonString);
-      if (error || !doc.containsKey("ssid") || !doc.containsKey("password"))
-      {
-        Serial.println(F("Failed to parse a request into wifi configuration."));
-        return false;
-      }
-      char ssid[128];
-      char password[128];
-      
-      strlcpy(ssid, doc["ssid"], sizeof(ssid));    
-      strlcpy(password, doc["password"], sizeof(password));
-      Serial.print("[WiFiSettingsRequestHandler.handle] SSID: ");
-      Serial.print(ssid);
-      Serial.print(", PWD: ");
-      Serial.println(password);
-      return true;
-    }
-
-  protected:
-    String _uri;  
+struct EEPROMFeederConfig {
+  FeederConfig config;
+  int hashSum;
 };
 
-class FeedConfigRequestHandler : public RequestHandler {
-  private:
-    short feedValueExtract(JsonDocument& doc, const char* prop) {
-        short val =  doc[prop].as<short>();
-        
-        Serial.print("[FeedRequestHandler.feedValueExtract] ");
-        Serial.print(prop);
-        Serial.print(" is ");
-        Serial.println(val);
-        
-        return val;
-    }
-  public:
-    FeedConfigRequestHandler(const char* uri = "feedConfig") : _uri(uri)
-    {
-    }
-    bool canHandle(HTTPMethod method, const String& uri) override
-    { 
-      Serial.print("[FeedConfigRequestHandler.canHandle] ");
-      Serial.print(method);
-      Serial.println(": " + uri);
+void printVal(const char* prop, int val) {
+  Serial.print(prop);
+  Serial.print(" is ");
+  Serial.println(val);
+}
 
-      return method == HTTP_POST && uri == _uri;
-    }
+void printConfig(FeederConfig config) {
+  printVal("config.feedSpeed", config.feedSpeed);
+  printVal("config.feedAmount", config.feedAmount);
+  printVal("config.stepsFrw", config.stepsFrw);
+  printVal("config.stepsBkw", config.stepsBkw);
+}
 
-    bool handle(ESP8266WebServer &server, HTTPMethod requestMethod, const String &requestUri) override 
-    { 
-      Serial.println("[FeedConfigRequestHandler.handle] " + requestUri);
-      if (!canHandle(requestMethod, requestUri)) {
-        return false;
-      }
-      String jsonString = server.arg("plain");
-      JsonDocument doc;
+int feederConfigHash(FeederConfig config) {
+  return config.feedAmount / 4 
+       + config.feedSpeed / 4 
+       + config.stepsBkw / 4 
+       + config.stepsFrw / 4;
+}
 
-      DeserializationError error = deserializeJson(doc, jsonString);
-      if (doc.containsKey("feedSpeed")) {
-        feeder.setFeedSpeed(feedValueExtract(doc, "feedSpeed"));
-      }
-      if (doc.containsKey("feedAmount")) {
-        feeder.setFeedAmount(feedValueExtract(doc, "feedAmount"));
-      }
-      if (doc.containsKey("feedSpeed")) {
-        feeder.setStepsFrw(feedValueExtract(doc, "stepsFrw"));
-      }
-      if (doc.containsKey("feedSpeed")) {
-        feeder.setStepsBkw(feedValueExtract(doc, "stepsBkw"));
-      }
-      return true;
-    }
+void readFeederConfigFromEEPROM() {
+  EEPROMFeederConfig eepromConfig;
+  
+  EEPROM.get(0, eepromConfig);
+  Serial.print("hashSum from EEPROM: ");
+  Serial.println(eepromConfig.hashSum);
 
-  protected:
-    String _uri;  
-};
+  EEPROM.get(0, eepromConfig);
+  printConfig(eepromConfig.config);
+  int calculatedHashSum = feederConfigHash(eepromConfig.config);
 
-class FeedRequestHandler : public RequestHandler {
-  public:
-    FeedRequestHandler(const char* uri = "feed") : _uri(uri)
-    {
-    }
-    bool canHandle(HTTPMethod method, const String& uri) override
-    { 
-      Serial.print("[FeedRequestHandler.canHandle] ");
-      Serial.print(method);
-      Serial.println(": " + uri);
+  Serial.print("calculated hashSum: ");
+  Serial.println(calculatedHashSum);
 
-      return method == HTTP_POST && uri == _uri;
-    }
+  if (eepromConfig.hashSum == calculatedHashSum) {
+    Serial.println("Apply stored config from EEPROM.");
+    feeder.setConfig(eepromConfig.config);
+  } else {
+    Serial.println("Feeder config is not stored in EEPROM.");
+  }
+}
 
-    bool handle(ESP8266WebServer &server, HTTPMethod requestMethod, const String &requestUri) override 
-    { 
-      Serial.println("[FeedRequestHandler.handle] " + requestUri);
-      if (!canHandle(requestMethod, requestUri)) {
-        return false;
-      }      
-      feeder.feed();
-      return true;
-    }
+void writeFeederConfigFromEEPROM(FeederConfig config) {
+  EEPROMFeederConfig toSave;
 
-  protected:
-    String _uri;  
-};
+  toSave.hashSum = feederConfigHash(config);
+  toSave.config = config;
+
+  Serial.print("HashSum for storing in the EEPROM: ");
+  Serial.println(toSave.hashSum);
+
+  EEPROM.put(0, toSave);
+  EEPROM.commit();
+}
 
 void setup() {
   Serial.begin(115200);
-  delay(1000); 
+  EEPROM.begin(sizeof(FeederConfig) + sizeof(int));
+  delay(1000);
   WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP    
 
   #if (DEBUG)
@@ -170,8 +109,9 @@ void setup() {
   } else {
       Serial.println("Configportal running");
   }
-  webServer.addHandler(new FeedRequestHandler("/feed"));
-  webServer.addHandler(new FeedConfigRequestHandler("/feedConfig"));
+  readFeederConfigFromEEPROM();
+  webServer.addHandler(new FeedRequestHandler(feeder, "/feed"));
+  webServer.addHandler(new FeedConfigRequestHandler(feeder, "/feedConfig"));
   Serial.println("[setup] Start web server.");
   webServer.begin();
   Serial.println("[setup] Web server started.");
@@ -179,8 +119,15 @@ void setup() {
 }
 
 void loop() {
+  int hashSum1 = feederConfigHash(feeder.getConfig());
+
   wifiManager.process();
   webServer.handleClient();
   feeder.handleFeeder();
+  int hashSum2 = feederConfigHash(feeder.getConfig());
+
+  if (hashSum1 != hashSum2) {
+    writeFeederConfigFromEEPROM(feeder.getConfig());
+  }
   delay(500);
 }

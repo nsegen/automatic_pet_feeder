@@ -11,51 +11,51 @@ void Feeder::disableMotor() {
 
 void Feeder::oneRev() {
   Serial.println("[Feeder.oneRev]");
-  for (int i = 0; i < stepsBkw; i++) runMotor(-1);
-  for (int i = 0; i < stepsFrw; i++) runMotor(1);
+  for (int i = 0; i < feederConfig.stepsBkw; i++) runMotor(-1);
+  for (int i = 0; i < feederConfig.stepsFrw; i++) runMotor(1);
 }
 
 void Feeder::runMotor(short dir) {
   static byte step = 0;
   for (byte i = 0; i < 4; i++) digitalWrite(drvPins[i], bitRead(steps[step & 0b11], i));
-  delayMicroseconds(feedSpeed);
+  delayMicroseconds(feederConfig.feedSpeed);
   step += dir;
 }
 
 Feeder::Feeder(const byte motorPins[4], const byte motorSteps[4]) : drvPins(motorPins), steps(motorSteps) {
-  feedSpeed = FEED_SPEED;   // задержка между шагами мотора (мкс)
-  feedAmount = FEED_AMOUNT;
-  stepsFrw = STEPS_FRW;       // шаги вперёд
-  stepsBkw = STEPS_BKW;
+  feederConfig.feedSpeed = FEED_SPEED;   // задержка между шагами мотора (мкс)
+  feederConfig.feedAmount = FEED_AMOUNT;
+  feederConfig.stepsFrw = STEPS_FRW;       // шаги вперёд
+  feederConfig.stepsBkw = STEPS_BKW;
   shouldFeed = false;
 }
 
-short Feeder::getFeedSpeed() { return feedSpeed; }
+short Feeder::getFeedSpeed() { return feederConfig.feedSpeed; }
 void Feeder::setFeedSpeed(short speed) { 
   Serial.print("[Feeder.setFeedSpeed] ");
   Serial.println(speed);
-  feedSpeed = speed;
+  feederConfig.feedSpeed = speed;
 }
 
-short Feeder::getFeedAmount() { return feedAmount; }
+short Feeder::getFeedAmount() { return feederConfig.feedAmount; }
 void Feeder::setFeedAmount(short amount) { 
   Serial.print("[Feeder.setFeedAmount] ");
   Serial.println(amount);
-  feedAmount = amount; 
+  feederConfig.feedAmount = amount; 
 }
 
-short Feeder::getStepsFrw() { return stepsFrw; }
+short Feeder::getStepsFrw() { return feederConfig.stepsFrw; }
 void Feeder::setStepsFrw(short steps) { 
   Serial.print("[Feeder.setStepsFrw] ");
   Serial.println(steps);
-  stepsFrw = steps; 
+  feederConfig.stepsFrw = steps; 
 }
 
-short Feeder::getStepsBkw() { return stepsBkw; }
+short Feeder::getStepsBkw() { return feederConfig.stepsBkw; }
 void Feeder::setStepsBkw(short steps) { 
   Serial.print("[Feeder.setStepsBkw] ");
   Serial.println(steps);
-  stepsBkw = steps; 
+  feederConfig.stepsBkw = steps; 
 }
 
 void Feeder::feed() { 
@@ -67,19 +67,27 @@ void Feeder::handleFeeder() {
     Serial.println("[Feeder.handleFeeder] Start feeding.");
     
     Serial.print("[Feeder.handleFeeder] feedSpeed = ");
-    Serial.println(feedSpeed);
+    Serial.println(feederConfig.feedSpeed);
     
     Serial.print("[Feeder.handleFeeder] feedAmount = ");
-    Serial.println(feedAmount);
+    Serial.println(feederConfig.feedAmount);
     
     Serial.print("[Feeder.handleFeeder] stepsFrw = ");
-    Serial.println(stepsFrw);
+    Serial.println(feederConfig.stepsFrw);
     
     Serial.print("[Feeder.handleFeeder] stepsBkw = ");
-    Serial.println(stepsBkw);
+    Serial.println(feederConfig.stepsBkw);
 
-    for (int i = 0; i < feedAmount; i++) oneRev();
+    for (int i = 0; i < feederConfig.feedAmount; i++) oneRev();
     disableMotor();
     shouldFeed = false;
   }
+}
+
+void Feeder::setConfig(FeederConfig config) {
+  feederConfig = config;
+}
+
+FeederConfig Feeder::getConfig() {
+  return feederConfig;
 }
