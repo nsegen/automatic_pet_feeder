@@ -10,7 +10,7 @@ from homeassistant import config_entries, exceptions
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN  # pylint:disable=unused-import
-from .hub import Hub
+from .hub import FeederDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,7 +25,10 @@ _LOGGER = logging.getLogger(__name__)
 # quite work as documented and always gave me the "Lokalise key references" string
 # (in square brackets), rather than the actual translated value. I did not attempt to
 # figure this out or look further into it.
-DATA_SCHEMA = vol.Schema({("host"): str})
+DATA_SCHEMA = vol.Schema({
+    vol.Required("name"): str,
+    vol.Required("host"): str
+})
 
 
 async def validate_input(hass: HomeAssistant, data: dict) -> dict[str, Any]:
@@ -41,10 +44,10 @@ async def validate_input(hass: HomeAssistant, data: dict) -> dict[str, Any]:
     if len(data["host"]) < 3:
         raise InvalidHost
 
-    hub = Hub(hass, data["host"])
+    feederDevice = FeederDevice(hass, data["name"], data["host"])
     # The dummy hub provides a `test_connection` method to ensure it's working
     # as expected
-    result = await hub.test_connection()
+    result = await feederDevice.test_connection()
     if not result:
         # If there is an error, raise an exception to notify HA that there was a
         # problem. The UI will also show there was a problem
@@ -65,7 +68,7 @@ async def validate_input(hass: HomeAssistant, data: dict) -> dict[str, Any]:
     # "Title" is what is displayed to the user for this hub device
     # It is stored internally in HA as part of the device config.
     # See `async_step_user` below for how this is used
-    return {"title": data["host"]}
+    return {"title": data["name"], "name": data["name"], "host": data["host"]}
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -76,7 +79,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # This tells HA if it should be asking for updates, or it'll be notified of updates
     # automatically. This example uses PUSH, as the dummy hub will notify HA of
     # changes.
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
+    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
