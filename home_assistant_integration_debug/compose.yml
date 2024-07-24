@@ -11,3 +11,10 @@ services:
     restart: on-failure
     privileged: true
     network_mode: host
+  feeder:
+    container_name: feeder
+    image: feeder:latest
+    build: ./feeder_device_emulator
+    ports:
+      - "5555:5555"
+      
