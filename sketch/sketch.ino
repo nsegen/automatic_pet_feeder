@@ -112,6 +112,7 @@ void setup() {
   readFeederConfigFromEEPROM();
   webServer.addHandler(new FeedRequestHandler(feeder, "/feed"));
   webServer.addHandler(new FeedConfigRequestHandler(feeder, "/feedConfig"));
+  webServer.addHandler(new FeedInfoRequestHandler("/deviceInfo"));
   Serial.println("[setup] Start web server.");
   webServer.begin();
   Serial.println("[setup] Web server started.");

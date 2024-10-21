@@ -1,8 +1,5 @@
-
-
-# importing all the functions  
-# from http.server module 
 import json
+import random
 from http.server import *
 from socketserver import BaseServer
 
@@ -14,6 +11,11 @@ class FeederConfigStorage:
             'steps_frw': 9,
             'steps_bkw': 3
         }
+        self.info = {
+            'model': 'Test Device',
+            'version': f'0.0.{random.randint(1, 9)}',
+            'manufacturer': 'Segen Nikita'
+        }
 
 configStorage = FeederConfigStorage()
 
@@ -23,7 +25,8 @@ class FeederAPI(BaseHTTPRequestHandler):
     
     def __init__(self, request, client_address, server: BaseServer) -> None:
         self.get_methods = {
-            '/feedConfig': self.get_config
+            '/feedConfig': self.get_config,
+            '/deviceInfo': self.get_info
         }
         self.post_methods = {
             '/feedConfig': self.save_config,
@@ -31,6 +34,12 @@ class FeederAPI(BaseHTTPRequestHandler):
         }
         super().__init__(request, client_address, server)
         
+    def get_info(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(bytes(json.dumps(configStorage.info), 'utf-8'))
+
     def get_config(self):
         self.send_response(200)
         self.send_header('Content-type', 'application/json')

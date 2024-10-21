@@ -105,7 +105,6 @@ class HelloWorldCover(CoverEntity):
         """Information about this entity/device."""
         return {
             "identifiers": {(DOMAIN, self._feederDevice._id)},
-            # If desired, the name for the device could be different to the entity
             "name": self.name,
             "sw_version": self._feederDevice.firmware_version,
             "model": self._feederDevice.model,

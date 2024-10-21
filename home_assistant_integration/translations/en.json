@@ -1,0 +1,14 @@
+{
+    "title": "Automatic Pet Feeder",
+    "config": {
+      "step": {
+        "user": {
+          "title": "Pet Feeder Configuration",
+          "data": {
+            "name": "Name",
+            "url": "URL"
+          }
+        }
+      }
+    }
+}
